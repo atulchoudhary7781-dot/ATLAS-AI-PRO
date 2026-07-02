@@ -1,0 +1,103 @@
+version: '3.9'
+
+services:
+  # Backend API Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: atlas-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=sqlite:///./atlas_pro.db
+      - ENVIRONMENT=production
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - atlas-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      - db
+
+  # Frontend Dashboard
+  frontend:
+    build:
+      context: ./atlas-frontend
+      dockerfile: Dockerfile.frontend
+    container_name: atlas-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws/tasks
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - atlas-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # SQLite Database (optional, mainly for structure)
+  db:
+    image: nouchka/sqlite3:latest
+    container_name: atlas-db
+    volumes:
+      - ./data/db:/root/db
+    networks:
+      - atlas-network
+    restart: unless-stopped
+
+  # Redis Cache (optional, for future caching)
+  cache:
+    image: redis:7-alpine
+    container_name: atlas-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    restart: unless-stopped
+    networks:
+      - atlas-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Nginx Reverse Proxy (optional, for production)
+  nginx:
+    image: nginx:alpine
+    container_name: atlas-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - atlas-network
+
+networks:
+  atlas-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
